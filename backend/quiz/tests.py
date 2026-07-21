@@ -303,6 +303,17 @@ class AttemptFlowTests(TestCase):
             self.assertIn('answer', aq)
             self.assertIn(aq['question']['type'], dict(QuestionType.choices))
 
+    def test_in_progress_attempt_does_not_leak_answers(self):
+        data = self._start()
+        res = self.client.get(f'/api/attempts/{data["id"]}/')
+        self.assertEqual(res.status_code, 200)
+        # Not yet submitted: no answer/correct-answer fields exposed.
+        for aq in res.data['questions']:
+            self.assertNotIn('answer', aq)
+            self.assertNotIn('text_answers', aq['question'])
+            for choice in aq['question']['choices']:
+                self.assertNotIn('is_correct', choice)
+
 
 class RandomnessTests(TestCase):
     def setUp(self):

@@ -67,10 +67,16 @@ class AttemptViewSet(viewsets.GenericViewSet):
         return Response(serializer.data)
 
     def retrieve(self, request, pk=None):
-        """Full review of a single attempt (prompts, answers, correct answers)."""
+        """Full review of a single attempt (prompts, answers, correct answers).
+
+        Correct answers are only exposed once the attempt has been submitted, so
+        players can't peek at answers for an in-progress quiz.
+        """
         attempt = self._get_attempt(pk)
         if attempt is None:
             return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+        if not attempt.is_submitted:
+            return Response(AttemptStartSerializer(attempt).data)
         return Response(AttemptReviewSerializer(attempt).data)
 
     def create(self, request):
