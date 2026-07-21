@@ -176,6 +176,8 @@ class AttemptViewSet(viewsets.GenericViewSet):
             attempt.submitted_at = timezone.now()
             attempt.save(update_fields=['score', 'submitted_at'])
 
+        # Re-fetch so the prefetch cache includes the answers just created.
+        attempt = self._get_attempt(attempt.id)
         return Response(AttemptReviewSerializer(attempt).data)
 
     # -- helpers ------------------------------------------------------------
