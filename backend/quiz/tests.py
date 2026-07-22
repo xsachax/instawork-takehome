@@ -330,3 +330,88 @@ class RandomnessTests(TestCase):
         self.assertEqual(len(ids1), 5)
         # With 20 questions, two 5-question draws being identical is very unlikely.
         self.assertNotEqual(ids1, ids2)
+
+
+class AuthEndpointTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        User.objects.create_user('staffer', password='pass12345', is_staff=True)
+        User.objects.create_user('plain', password='pass12345', is_staff=False)
+
+    def test_login_requires_staff(self):
+        res = self.client.post('/api/auth/login/',
+                               {'username': 'plain', 'password': 'pass12345'},
+                               format='json')
+        self.assertEqual(res.status_code, 401)
+
+    def test_login_rejects_bad_password(self):
+        res = self.client.post('/api/auth/login/',
+                               {'username': 'staffer', 'password': 'wrong'},
+                               format='json')
+        self.assertEqual(res.status_code, 401)
+
+    def test_login_and_me_and_logout(self):
+        login = self.client.post('/api/auth/login/',
+                                 {'username': 'staffer', 'password': 'pass12345'},
+                                 format='json')
+        self.assertEqual(login.status_code, 200)
+        self.assertTrue(login.data['is_staff'])
+
+        me = self.client.get('/api/auth/me/')
+        self.assertEqual(me.data['username'], 'staffer')
+
+        self.client.post('/api/auth/logout/')
+        me_after = self.client.get('/api/auth/me/')
+        self.assertIsNone(me_after.data['username'])
+
+
+class QuestionCrudTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        staff = User.objects.create_user('admin', password='pass12345',
+                                          is_staff=True)
+        self.client.force_authenticate(staff)
+
+    def test_delete_question(self):
+        create = self.client.post('/api/questions/', {
+            'type': 'text', 'prompt': 'to delete', 'text_answers': ['x'],
+        }, format='json')
+        qid = create.data['id']
+        res = self.client.delete(f'/api/questions/{qid}/')
+        self.assertEqual(res.status_code, 204)
+        self.assertEqual(Question.objects.filter(id=qid).count(), 0)
+
+    def test_filter_by_type(self):
+        self.client.post('/api/questions/', {
+            'type': 'text', 'prompt': 'a', 'text_answers': ['x'],
+        }, format='json')
+        self.client.post('/api/questions/', {
+            'type': 'numerical', 'prompt': 'b', 'numerical_answer': 1,
+        }, format='json')
+        res = self.client.get('/api/questions/?type=numerical')
+        self.assertEqual(len(res.data), 1)
+        self.assertEqual(res.data[0]['type'], 'numerical')
+
+
+class ScoreOverrideTests(TestCase):
+    def test_recompute_score_after_manual_override(self):
+        from quiz.models import Answer, Attempt, AttemptQuestion
+
+        question = Question.objects.create(
+            type=QuestionType.IMAGE, prompt='upload',
+            image_requirement='any image')
+        attempt = Attempt.objects.create(player='eve', total=1,
+                                         submitted_at='2026-01-01T00:00:00Z')
+        aq = AttemptQuestion.objects.create(attempt=attempt, question=question)
+        answer = Answer.objects.create(attempt_question=aq, is_correct=True,
+                                       needs_review=True)
+        attempt.recompute_score()
+        attempt.refresh_from_db()
+        self.assertEqual(attempt.score, 1)
+
+        # Staff overrides the image answer as incorrect.
+        answer.is_correct = False
+        answer.save(update_fields=['is_correct'])
+        attempt.recompute_score()
+        attempt.refresh_from_db()
+        self.assertEqual(attempt.score, 0)

@@ -115,6 +115,22 @@ class Attempt(models.Model):
     def is_submitted(self):
         return self.submitted_at is not None
 
+    def recompute_score(self):
+        """Recalculate and persist the score from the current answers.
+
+        Used after a staff member overrides an auto-graded answer (e.g. an image
+        or free-text response) so the stored score stays consistent.
+        """
+        score = sum(
+            1
+            for aq in self.attempt_questions.all()
+            if getattr(aq, 'answer', None) and aq.answer.is_correct
+        )
+        if score != self.score:
+            self.score = score
+            self.save(update_fields=['score'])
+        return score
+
 
 class AttemptQuestion(models.Model):
     """A frozen snapshot linking an attempt to one of its served questions."""
