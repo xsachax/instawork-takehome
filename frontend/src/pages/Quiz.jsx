@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api, QUESTION_TYPE_LABELS } from '../api'
 import QuestionInput from '../components/QuestionInput'
+import { getJudgeKey, clearJudgeKey } from '../player'
 import { useDocumentTitle } from '../hooks'
 
 export default function Quiz() {
@@ -68,7 +69,12 @@ export default function Quiz() {
         }
       })
       form.append('answers', JSON.stringify(answerList))
+      // Re-send the per-attempt judge key (if the player provided one) so
+      // free-response and image answers can be AI-graded. Then clear it.
+      const judgeKey = getJudgeKey(attempt.id)
+      if (judgeKey) form.append('judge_api_key', judgeKey)
       await api.submitAttempt(attempt.id, form)
+      clearJudgeKey(attempt.id)
       sessionStorage.removeItem(`attempt.${attempt.id}`)
       navigate(`/results/${attempt.id}`)
     } catch (err) {

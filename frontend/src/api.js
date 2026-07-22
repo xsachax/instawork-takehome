@@ -66,8 +66,11 @@ export const api = {
   deleteQuestion: (id) => request(`/questions/${id}/`, { method: 'DELETE' }),
 
   // Quiz player
-  startAttempt: (player) =>
-    request('/attempts/', { method: 'POST', body: { player } }),
+  startAttempt: (player, judgeApiKey) =>
+    request('/attempts/', {
+      method: 'POST',
+      body: judgeApiKey ? { player, judge_api_key: judgeApiKey } : { player },
+    }),
   getAttempt: (id) => request(`/attempts/${id}/`),
   submitAttempt: (id, formData) =>
     request(`/attempts/${id}/submit/`, {
