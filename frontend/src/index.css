@@ -131,6 +131,7 @@ select {
 textarea { min-height: 80px; resize: vertical; }
 
 .field { margin-bottom: 1rem; }
+.field-hint { margin: 0.35rem 0 0; font-size: 0.95rem; }
 .row { display: flex; gap: 1rem; flex-wrap: wrap; }
 .row > * { flex: 1 1 200px; }
 

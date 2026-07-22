@@ -4,6 +4,19 @@ import { api, QUESTION_TYPE_LABELS } from '../api'
 import QuestionInput from '../components/QuestionInput'
 import { useDocumentTitle } from '../hooks'
 
+function getStoredJudgeOptions(attemptId) {
+  try {
+    return JSON.parse(sessionStorage.getItem(`attempt.${attemptId}.judge`) || '{}')
+  } catch {
+    return {}
+  }
+}
+
+function clearAttemptStorage(attemptId) {
+  sessionStorage.removeItem(`attempt.${attemptId}`)
+  sessionStorage.removeItem(`attempt.${attemptId}.judge`)
+}
+
 export default function Quiz() {
   useDocumentTitle('Quiz in progress')
   const { attemptId } = useParams()
@@ -68,8 +81,8 @@ export default function Quiz() {
         }
       })
       form.append('answers', JSON.stringify(answerList))
-      await api.submitAttempt(attempt.id, form)
-      sessionStorage.removeItem(`attempt.${attempt.id}`)
+      await api.submitAttempt(attempt.id, form, getStoredJudgeOptions(attempt.id))
+      clearAttemptStorage(attempt.id)
       navigate(`/results/${attempt.id}`)
     } catch (err) {
       setError(err?.data?.detail || 'Could not submit your answers.')
@@ -123,7 +136,10 @@ export default function Quiz() {
           <button
             type="button"
             className="btn-secondary"
-            onClick={() => navigate('/')}
+            onClick={() => {
+              clearAttemptStorage(attempt.id)
+              navigate('/')
+            }}
           >
             Cancel
           </button>
