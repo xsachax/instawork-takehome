@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api'
 import { getPlayer, setPlayer, formatDateTime } from '../player'
+import { useDocumentTitle } from '../hooks'
 
 export default function History() {
+  useDocumentTitle('My attempts')
   const [name, setName] = useState(getPlayer())
   const [query, setQuery] = useState(getPlayer())
   const [attempts, setAttempts] = useState([])

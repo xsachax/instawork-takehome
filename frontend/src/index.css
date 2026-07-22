@@ -97,6 +97,8 @@ main {
   margin: 0 auto;
   padding: 1.5rem 1rem 4rem;
 }
+/* main receives programmatic focus on route change; no visible ring needed. */
+main#main:focus { outline: none; }
 
 .card {
   background: var(--surface);

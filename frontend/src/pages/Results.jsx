@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, QUESTION_TYPE_LABELS } from '../api'
 import { formatDateTime } from '../player'
+import { useDocumentTitle } from '../hooks'
 
 function ChoiceReview({ question, answer }) {
   const selected = new Set(answer?.selected_choice_ids || [])
@@ -73,6 +74,7 @@ function AnswerReview({ question, answer }) {
 }
 
 export default function Results() {
+  useDocumentTitle('Results')
   const { attemptId } = useParams()
   const navigate = useNavigate()
   const [attempt, setAttempt] = useState(null)

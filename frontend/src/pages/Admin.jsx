@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, QUESTION_TYPE_LABELS } from '../api'
 import QuestionForm from '../components/QuestionForm'
+import { useDocumentTitle } from '../hooks'
 
 function LoginForm({ onLoggedIn }) {
   const [username, setUsername] = useState('')
@@ -213,6 +214,7 @@ function QuestionBank({ user, onLogout }) {
 }
 
 export default function Admin() {
+  useDocumentTitle('Admin')
   const [user, setUser] = useState(null)
   const [checked, setChecked] = useState(false)
 

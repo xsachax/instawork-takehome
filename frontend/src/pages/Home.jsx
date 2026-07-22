@@ -2,8 +2,10 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import { getPlayer, setPlayer } from '../player'
+import { useDocumentTitle } from '../hooks'
 
 export default function Home() {
+  useDocumentTitle('Start a quiz')
   const navigate = useNavigate()
   const [name, setName] = useState(getPlayer())
   const [error, setError] = useState(null)

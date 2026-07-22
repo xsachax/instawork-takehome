@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api, QUESTION_TYPE_LABELS } from '../api'
 import QuestionInput from '../components/QuestionInput'
+import { useDocumentTitle } from '../hooks'
 
 export default function Quiz() {
+  useDocumentTitle('Quiz in progress')
   const { attemptId } = useParams()
   const navigate = useNavigate()
   const [attempt, setAttempt] = useState(null)
