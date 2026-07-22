@@ -14,21 +14,59 @@ screen, and per‑player **attempt history**.
 
 ---
 
+## Quick start
+
+The fastest way to get running (no admin account required):
+
+```bash
+./setup.sh
+```
+
+`setup.sh` checks prerequisites, creates a Python virtual environment, installs
+backend and frontend dependencies, applies migrations, and seeds the question
+bank (only if it is empty). Then start the two servers:
+
+```bash
+# Terminal 1 — backend
+source .venv/bin/activate
+cd backend && python manage.py runserver      # http://localhost:8000
+
+# Terminal 2 — frontend
+cd frontend && npm run dev                     # http://localhost:5173
+```
+
+Open <http://localhost:5173> and choose **Play**. Prefer to set things up by
+hand? Follow the [Backend setup](#1-backend-setup) and
+[Frontend setup](#2-frontend-setup) steps below.
+
+### Onboarding with an AI agent
+
+Using an AI coding agent? Point it at the onboarding skill at
+[`.github/skills/onboarding/SKILL.md`](.github/skills/onboarding/SKILL.md). It
+walks the agent through setup, running the app, running the tests, the codebase
+map, and the optional AI‑judge feature.
+
+---
+
 ## Repository layout
 
 ```
 .
+├── setup.sh                # one-command local setup (non-admin)
 ├── backend/                # Django + DRF API
 │   ├── config/             # project settings & URLs
 │   ├── quiz/               # app: models, serializers, views, grading, tests
+│   │   ├── grading.py      # deterministic grading
+│   │   ├── judge.py        # optional AI judge (text/image)
 │   │   └── management/commands/seed_questions.py
 │   ├── manage.py
 │   └── requirements.txt
-└── frontend/               # React + Vite SPA
-    └── src/
-        ├── pages/          # Home, Quiz, Results, History, Admin
-        ├── components/     # QuestionInput, QuestionForm
-        └── api.js          # API client
+├── frontend/               # React + Vite SPA
+│   └── src/
+│       ├── pages/          # Home, Quiz, Results, History, Admin
+│       ├── components/     # QuestionInput, QuestionForm
+│       └── api.js          # API client
+└── .github/skills/onboarding/SKILL.md   # onboarding skill for AI agents
 ```
 
 ---
