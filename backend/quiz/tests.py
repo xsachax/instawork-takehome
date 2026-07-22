@@ -1,10 +1,12 @@
 """Tests for the quiz platform: grading, validation, and the attempt flow."""
 
+import base64
 import io
 import json
 from unittest import mock
 from decimal import Decimal
 
+import requests
 from django.contrib.auth.models import User
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
@@ -23,6 +25,8 @@ from quiz.models import (
     QuestionType,
     TextMatchMode,
 )
+from quiz import judge
+from quiz.judge import JudgeVerdict
 
 
 def make_choice_question(qtype, options):
@@ -460,6 +464,56 @@ class JudgeAttemptTests(TestCase):
         self.assertTrue(answer['needs_review'])
         mock_chat.assert_not_called()
 
+    @override_settings(QUIZ_QUESTION_COUNT=1)
+    @mock.patch('quiz.judge._call_chat_completion')
+    def test_submit_with_judge_key_marks_image_correct(self, mock_chat):
+        mock_chat.return_value = '{"correct": true, "reason": "matches"}'
+        question = Question.objects.create(
+            type=QuestionType.IMAGE, prompt='upload',
+            image_requirement='a blue object')
+        data = self._start_single_question_attempt(question)
+        aq = data['questions'][0]
+
+        res = self.client.post(f'/api/attempts/{data["id"]}/submit/', {
+            'answers': json.dumps([{'attempt_question_id': aq['id']}]),
+            f'image_{aq["id"]}': make_image_upload(),
+            'judge_api_key': 'sk-test',
+        }, format='multipart')
+
+        self.assertEqual(res.status_code, 200)
+        answer = res.data['questions'][0]['answer']
+        self.assertTrue(answer['is_correct'])
+        self.assertFalse(answer['needs_review'])
+        self.assertEqual(res.data['score'], 1)
+        mock_chat.assert_called_once()
+
+    @override_settings(QUIZ_QUESTION_COUNT=1)
+    @mock.patch('quiz.judge._call_chat_completion')
+    def test_submit_with_judge_key_falls_back_when_judge_errors(self, mock_chat):
+        # A None result stands in for a network error, timeout, or unparseable
+        # response: the request should not fail; grading falls back to the
+        # heuristic and flags the answer for review.
+        mock_chat.return_value = None
+        question = Question.objects.create(
+            type=QuestionType.TEXT, prompt='ocean', text_answers=['Pacific'],
+            text_match_mode=TextMatchMode.EXACT)
+        data = self._start_single_question_attempt(question)
+        aq = data['questions'][0]
+
+        res = self.client.post(f'/api/attempts/{data["id"]}/submit/', {
+            'answers': json.dumps([{
+                'attempt_question_id': aq['id'],
+                'text': 'Pacific',
+            }]),
+            'judge_api_key': 'sk-test',
+        }, format='multipart')
+
+        self.assertEqual(res.status_code, 200)
+        answer = res.data['questions'][0]['answer']
+        self.assertTrue(answer['is_correct'])
+        self.assertTrue(answer['needs_review'])
+        mock_chat.assert_called_once()
+
 
 class RandomnessTests(TestCase):
     def setUp(self):
@@ -561,3 +615,36 @@ class ScoreOverrideTests(TestCase):
         attempt.recompute_score()
         attempt.refresh_from_db()
         self.assertEqual(attempt.score, 0)
+
+
+class JudgeUnitTests(TestCase):
+    """Unit coverage for the judge module internals (no network)."""
+
+    def test_parse_verdict_handles_plain_json(self):
+        verdict = judge._parse_judge_content('{"correct": true, "reason": "ok"}')
+        self.assertIsInstance(verdict, JudgeVerdict)
+        self.assertTrue(verdict.correct)
+        self.assertEqual(verdict.reason, 'ok')
+
+    def test_parse_verdict_extracts_embedded_json(self):
+        verdict = judge._parse_judge_content(
+            'Sure: {"correct": false, "reason": "nope"} — done')
+        self.assertIsInstance(verdict, JudgeVerdict)
+        self.assertFalse(verdict.correct)
+
+    def test_parse_verdict_rejects_garbage(self):
+        self.assertIsNone(judge._parse_judge_content('not json at all'))
+        self.assertIsNone(judge._parse_judge_content(None))
+
+    def test_image_to_data_url_roundtrip(self):
+        data_url = judge._image_to_data_url(make_image_upload())
+        self.assertTrue(data_url.startswith('data:image/png;base64,'))
+        encoded = data_url.split(',', 1)[1]
+        self.assertTrue(base64.b64decode(encoded).startswith(b'\x89PNG'))
+
+    def test_call_chat_completion_returns_none_on_request_error(self):
+        with mock.patch('quiz.judge.requests.post',
+                        side_effect=requests.RequestException('boom')):
+            result = judge._call_chat_completion(
+                api_key='sk-test', base_url=None, model=None, messages=[])
+        self.assertIsNone(result)
