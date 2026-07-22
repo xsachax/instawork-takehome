@@ -23,10 +23,11 @@ screen, and per‑player **attempt history**.
 ```
 
 `start.sh` is the friendly, non-technical entrypoint. On the first run it sets
-everything up (dependencies, database, sample questions); on every run it starts
-the **backend and frontend together**, waits until they're ready, opens the app
-in your browser, and shuts both down cleanly when you press **Ctrl+C**. No admin
-account required. Server logs go to `.run-logs/`.
+everything up (dependencies, database, sample questions) and offers to create an
+admin account; on every run it starts the **backend and frontend together**,
+waits until they're ready, opens the app in your browser, and shuts both down
+cleanly when you press **Ctrl+C**. No admin account required to play. Server
+logs go to `.run-logs/`.
 
 That's it — open <http://localhost:5173> and choose **Play** (it opens
 automatically).

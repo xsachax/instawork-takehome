@@ -95,7 +95,9 @@ for pp in "$BACKEND_PORT" "$FRONTEND_PORT"; do
 done
 
 # ---- 1. first-run setup ---------------------------------------------------
+FIRST_RUN=0
 if [ ! -d "$VENV" ] || [ ! -d "$ROOT/frontend/node_modules" ]; then
+  FIRST_RUN=1
   info "First run detected — setting things up. This can take a few minutes…"
   if ! bash "$ROOT/setup.sh"; then
     error "Setup did not finish. Please read the messages above and try again."
@@ -115,6 +117,36 @@ question_count="$(
 if [ "${question_count:-0}" = "0" ]; then
   info "Adding sample questions…"
   ( cd "$ROOT/backend" && python manage.py seed_questions >/dev/null 2>&1 ) || true
+fi
+
+# ---- first-run only: offer to create an admin account --------------------
+# Admin accounts live in the local database (never in the repo), so a fresh
+# clone has none. Offer to create one on the very first run only; afterwards
+# use `cd backend && python manage.py createsuperuser`.
+if [ "$FIRST_RUN" = "1" ]; then
+  has_superuser="$(
+    cd "$ROOT/backend" && python -c "import os, django; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings'); django.setup(); from django.contrib.auth import get_user_model; print(get_user_model().objects.filter(is_superuser=True).exists())" 2>/dev/null || echo False
+  )"
+  if [ "$has_superuser" != "True" ]; then
+    if [ -t 0 ]; then
+      printf '\n'
+      info "Optional: create an admin account to manage the question bank."
+      printf '%s==>%s Create an admin now? [y/N] ' "$GREEN$BOLD" "$RESET"
+      reply=""
+      read -r reply || true
+      case "$reply" in
+        [yY]|[yY][eE][sS])
+          ( cd "$ROOT/backend" && python manage.py createsuperuser ) \
+            || warn "Admin not created. You can run 'cd backend && python manage.py createsuperuser' later."
+          ;;
+        *)
+          info "Skipped. Create one later with: (cd backend && python manage.py createsuperuser)"
+          ;;
+      esac
+    else
+      info "No admin account yet — create one with: (cd backend && python manage.py createsuperuser)"
+    fi
+  fi
 fi
 
 # ---- 2. start both servers ------------------------------------------------

@@ -42,10 +42,11 @@ From the repository root:
 ```
 
 `start.sh` does everything: on first run it sets up dependencies, the database,
-and sample questions; then it starts the backend and frontend together, waits
-until they're ready, opens the app in the browser, and stops both cleanly on
-Ctrl+C. Server logs are written to `.run-logs/`. If you use this, you can skip
-sections 4–5 below (they explain the manual equivalent).
+and sample questions, and offers to create an admin account; then it starts the
+backend and frontend together, waits until they're ready, opens the app in the
+browser, and stops both cleanly on Ctrl+C. Server logs are written to
+`.run-logs/`. If you use this, you can skip sections 4–5 below (they explain the
+manual equivalent).
 
 ## 4. Manual setup (do this if not using `./start.sh`)
 
