@@ -55,11 +55,6 @@ export default function Home() {
           You'll get a set of random questions. Answer them, submit, and see your
           score with a full review.
         </p>
-        <p className="muted">
-          Add a judge API key to include free-response and image questions graded
-          by an AI judge. Without a key, your quiz uses only auto-graded single
-          choice, multiple choice, and numerical questions.
-        </p>
         {error && (
           <div className="alert alert-error" role="alert">{error}</div>
         )}
@@ -76,23 +71,19 @@ export default function Home() {
             />
           </div>
           <div className="field">
-            <label htmlFor="judge-api-key">Judge API key (optional)</label>
+            <label htmlFor="judge-api-key">OpenAI API key (optional)</label>
             <input
               id="judge-api-key"
               type="password"
               value={judgeApiKey}
               autoComplete="off"
               onChange={(e) => setJudgeApiKey(e.target.value)}
-              aria-describedby="judge-api-key-help judge-api-key-security"
+              aria-describedby="judge-api-key-help"
               placeholder="sk-..."
             />
             <p id="judge-api-key-help" className="muted field-hint">
-              With a key, free-response and image uploads can appear and are
-              graded by a vision-capable OpenAI-compatible judge.
-            </p>
-            <p id="judge-api-key-security" className="muted field-hint">
-              The key is sent only for this attempt and kept in this tab until
-              you submit or cancel.
+              Provide an OpenAI API key to include and auto-grade free-response
+              and image questions (omit it for auto-graded questions only).
             </p>
           </div>
           <button type="submit" disabled={loading}>

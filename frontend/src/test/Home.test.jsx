@@ -11,8 +11,8 @@ describe('Home', () => {
       </MemoryRouter>,
     )
 
-    const input = screen.getByLabelText(/judge api key/i)
+    const input = screen.getByLabelText(/openai api key/i)
     expect(input).toHaveAttribute('type', 'password')
-    expect(screen.getByText(/without a key/i)).toBeInTheDocument()
+    expect(screen.getByText(/free-response\s+and image questions/i)).toBeInTheDocument()
   })
 })
