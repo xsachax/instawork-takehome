@@ -16,7 +16,25 @@ screen, and per‑player **attempt history**.
 
 ## Quick start
 
-The fastest way to get running (no admin account required):
+**The easiest way — one command that does everything:**
+
+```bash
+./start.sh
+```
+
+`start.sh` is the friendly, non-technical entrypoint. On the first run it sets
+everything up (dependencies, database, sample questions); on every run it starts
+the **backend and frontend together**, waits until they're ready, opens the app
+in your browser, and shuts both down cleanly when you press **Ctrl+C**. No admin
+account required. Server logs go to `.run-logs/`.
+
+That's it — open <http://localhost:5173> and choose **Play** (it opens
+automatically).
+
+<details>
+<summary>Prefer to set up and run the two servers separately?</summary>
+
+Set up once:
 
 ```bash
 ./setup.sh
@@ -24,7 +42,7 @@ The fastest way to get running (no admin account required):
 
 `setup.sh` checks prerequisites, creates a Python virtual environment, installs
 backend and frontend dependencies, applies migrations, and seeds the question
-bank (only if it is empty). Then start the two servers:
+bank (only if it is empty). Then start the two servers in two terminals:
 
 ```bash
 # Terminal 1 — backend
@@ -35,9 +53,11 @@ cd backend && python manage.py runserver      # http://localhost:8000
 cd frontend && npm run dev                     # http://localhost:5173
 ```
 
-Open <http://localhost:5173> and choose **Play**. Prefer to set things up by
-hand? Follow the [Backend setup](#1-backend-setup) and
-[Frontend setup](#2-frontend-setup) steps below.
+Prefer to set things up entirely by hand? Follow the
+[Backend setup](#1-backend-setup) and [Frontend setup](#2-frontend-setup) steps
+below.
+
+</details>
 
 ### Onboarding with an AI agent
 
@@ -59,6 +79,7 @@ map, and the optional AI‑judge feature.
 
 ```
 .
+├── start.sh                # one-command run: sets up + starts both servers
 ├── setup.sh                # one-command local setup (non-admin)
 ├── backend/                # Django + DRF API
 │   ├── config/             # project settings & URLs
@@ -279,6 +300,11 @@ environment variables.
 ## Quick start (TL;DR)
 
 ```bash
+# Easiest — one command sets up and runs everything:
+./start.sh
+# open http://localhost:5173 (opens automatically); Ctrl+C to stop
+
+# Or run the two servers by hand:
 # Terminal 1 — backend
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r backend/requirements.txt

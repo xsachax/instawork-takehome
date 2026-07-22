@@ -85,7 +85,13 @@ info "Installing frontend dependencies (npm install)"
 # ---- done ----------------------------------------------------------------
 cat <<EOF
 
-${GREEN}${BOLD}Setup complete!${RESET} Start the app with two terminals:
+${GREEN}${BOLD}Setup complete!${RESET}
+
+The easiest way to run the app is the one-command runner:
+
+    ${BOLD}./start.sh${RESET}      # starts backend + frontend, opens your browser
+
+Or start the two servers yourself in separate terminals:
 
   ${BOLD}Terminal 1 (backend)${RESET}
     source .venv/bin/activate

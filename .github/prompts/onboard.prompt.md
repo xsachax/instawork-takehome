@@ -23,18 +23,21 @@ A small quiz platform:
 
 1. **Check prerequisites:** Python 3.11+ and Node.js 18+ with npm.
    Run `python3 --version`, `node --version`, `npm --version` and report anything missing.
-2. **Run one-command setup** from the repo root: `./setup.sh`
-   (creates `.venv`, installs backend + frontend deps, migrates, seeds the
-   question bank only if empty; does not create an admin). If `setup.sh` fails on
-   a missing tool, install it and re-run. If the script is unavailable, fall back
-   to the manual steps in `README.md`.
-3. **Start both servers** (two terminals):
+2. **Easiest path — one command** from the repo root: `./start.sh`
+   It sets up everything on first run (deps, database, sample questions), then
+   starts the backend and frontend together, opens the browser, and stops both on
+   Ctrl+C (logs in `.run-logs/`). If you use `./start.sh`, skip steps 3–4.
+3. **Or set up manually:** `./setup.sh` (creates `.venv`, installs backend +
+   frontend deps, migrates, seeds the question bank only if empty; does not create
+   an admin). If it fails on a missing tool, install it and re-run. If the script
+   is unavailable, fall back to the manual steps in `README.md`.
+4. **Or start the two servers yourself** (two terminals):
    - Backend: `source .venv/bin/activate && cd backend && python manage.py runserver` → http://localhost:8000
    - Frontend: `cd frontend && npm run dev` → http://localhost:5173
-4. **Verify it works:**
+5. **Verify it works:**
    - `curl -s -X POST http://localhost:8000/api/attempts/ -H 'Content-Type: application/json' -d '{"player":"tester"}'` returns an attempt with 5 questions.
    - http://localhost:5173 loads and lets you start a quiz.
-5. **Run the tests and report results:**
+6. **Run the tests and report results:**
    - Backend: `(cd backend && source ../.venv/bin/activate && python manage.py test)`
    - Frontend: `(cd frontend && npm test && npm run lint && npm run build)`
 

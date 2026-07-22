@@ -33,7 +33,21 @@ A small quiz platform:
 
 Verify: `python3 --version`, `node --version`, `npm --version`.
 
-## 3. One-command setup (do this first)
+## 3. Easiest path: one command
+
+From the repository root:
+
+```bash
+./start.sh
+```
+
+`start.sh` does everything: on first run it sets up dependencies, the database,
+and sample questions; then it starts the backend and frontend together, waits
+until they're ready, opens the app in the browser, and stops both cleanly on
+Ctrl+C. Server logs are written to `.run-logs/`. If you use this, you can skip
+sections 4–5 below (they explain the manual equivalent).
+
+## 4. Manual setup (do this if not using `./start.sh`)
 
 From the repository root:
 
@@ -46,7 +60,7 @@ migrations, and seeds the question bank (only if empty). It does **not** create
 an admin account (not needed to play). If `setup.sh` is unavailable, follow the
 manual steps in `README.md`.
 
-## 4. Run the app (two terminals)
+## 5. Run the app manually (two terminals)
 
 ```bash
 # Terminal 1 — backend API on http://localhost:8000
@@ -66,7 +80,7 @@ Open **http://localhost:5173** and choose **Play**. The Vite dev server proxies
   should return an attempt with 5 questions.
 - The browser home page should load and let you start a quiz.
 
-## 5. Run the tests
+## 6. Run the tests
 
 ```bash
 # Backend (Django test runner)
@@ -79,7 +93,7 @@ Open **http://localhost:5173** and choose **Play**. The Vite dev server proxies
 All suites should pass. The frontend tests never hit the network; backend judge
 tests mock the LLM HTTP call.
 
-## 6. Codebase map
+## 7. Codebase map
 
 ```
 backend/
@@ -97,7 +111,7 @@ frontend/src/
   api.js                  # fetch-based API client
 ```
 
-## 7. Grading & the optional AI judge
+## 8. Grading & the optional AI judge
 
 - **Single / Multiple / Numerical** are auto-graded deterministically.
 - **Text / Image** are non-deterministic. By default they use a heuristic and
@@ -108,7 +122,7 @@ frontend/src/
   the deterministic question types are served. See `backend/quiz/judge.py` and
   the README for details.
 
-## 8. Become an admin (optional)
+## 9. Become an admin (optional)
 
 To create/edit/delete questions:
 
@@ -120,8 +134,12 @@ cd backend && python manage.py createsuperuser
 Then sign in on the **Admin** page in the SPA, or at
 `http://localhost:8000/admin/`.
 
-## 9. Troubleshooting
+## 10. Troubleshooting
 
+- **`./start.sh` says a port is already in use:** something is already listening
+  on 8000 or 5173 (maybe a previous run). Stop it, then re-run `./start.sh`. To
+  see why a server didn't start, check `.run-logs/backend.log` and
+  `.run-logs/frontend.log`.
 - **`./setup.sh` fails on a missing tool:** install the tool it names and re-run.
 - **Empty quiz / "question bank is empty":** run
   `(cd backend && python manage.py seed_questions)`.
