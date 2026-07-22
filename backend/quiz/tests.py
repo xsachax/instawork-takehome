@@ -2,10 +2,11 @@
 
 import io
 import json
+from unittest import mock
 from decimal import Decimal
 
 from django.contrib.auth.models import User
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 from PIL import Image
 
@@ -188,6 +189,11 @@ class AttemptFlowTests(TestCase):
         self.numerical = Question.objects.create(
             type=QuestionType.NUMERICAL, prompt='2+2',
             numerical_answer=Decimal('4'), numerical_tolerance=Decimal('0'))
+        self.single_extra = make_choice_question(
+            QuestionType.SINGLE, [('Yes', True), ('No', False)])
+        self.numerical_extra = Question.objects.create(
+            type=QuestionType.NUMERICAL, prompt='3+3',
+            numerical_answer=Decimal('6'), numerical_tolerance=Decimal('0'))
         self.text = Question.objects.create(
             type=QuestionType.TEXT, prompt='ocean', text_answers=['Pacific'],
             text_match_mode=TextMatchMode.EXACT)
@@ -221,6 +227,17 @@ class AttemptFlowTests(TestCase):
         qids = [aq['question']['id'] for aq in data['questions']]
         self.assertEqual(len(qids), len(set(qids)))
 
+    def test_start_without_judge_key_excludes_text_and_image(self):
+        data = self._start()
+        types = {aq['question']['type'] for aq in data['questions']}
+        self.assertTrue(types <= {
+            QuestionType.SINGLE,
+            QuestionType.MULTIPLE,
+            QuestionType.NUMERICAL,
+        })
+        self.assertNotIn(QuestionType.TEXT, types)
+        self.assertNotIn(QuestionType.IMAGE, types)
+
     def _answer_for(self, aq, correct=True):
         q = aq['question']
         entry = {'attempt_question_id': aq['id']}
@@ -231,7 +248,10 @@ class AttemptFlowTests(TestCase):
             ids = [c['id'] for c in q['choices']]
             entry['selected_choice_ids'] = ids[:2] if correct else ids[:1]
         elif q['type'] == 'numerical':
-            entry['numerical'] = 4 if correct else 99
+            if correct:
+                entry['numerical'] = 4 if q['id'] == self.numerical.id else 6
+            else:
+                entry['numerical'] = 99
         elif q['type'] == 'text':
             entry['text'] = 'Pacific' if correct else 'Atlantic'
         return entry
@@ -315,12 +335,138 @@ class AttemptFlowTests(TestCase):
                 self.assertNotIn('is_correct', choice)
 
 
+class JudgeAttemptTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+    @override_settings(QUIZ_QUESTION_COUNT=2)
+    def test_start_with_judge_key_permits_text_and_image(self):
+        Question.objects.create(
+            type=QuestionType.TEXT, prompt='ocean', text_answers=['Pacific'])
+        Question.objects.create(
+            type=QuestionType.IMAGE, prompt='upload',
+            image_requirement='a blue object')
+
+        res = self.client.post('/api/attempts/', {
+            'player': 'alice',
+            'judge_api_key': 'sk-test',
+        }, format='json')
+
+        self.assertEqual(res.status_code, 201)
+        types = {aq['question']['type'] for aq in res.data['questions']}
+        self.assertEqual(types, {QuestionType.TEXT, QuestionType.IMAGE})
+        self.assertNotIn('sk-test', json.dumps(res.data))
+
+    def _start_single_question_attempt(self, question):
+        res = self.client.post('/api/attempts/', {
+            'player': 'alice',
+            'judge_api_key': 'sk-test',
+        }, format='json')
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual(res.data['questions'][0]['question']['id'], question.id)
+        return res.data
+
+    @override_settings(QUIZ_QUESTION_COUNT=1)
+    @mock.patch('quiz.judge._call_chat_completion')
+    def test_submit_with_judge_key_marks_text_correct(self, mock_chat):
+        mock_chat.return_value = '{"correct": true, "reason": "matches"}'
+        question = Question.objects.create(
+            type=QuestionType.TEXT, prompt='ocean', text_answers=['Pacific'])
+        data = self._start_single_question_attempt(question)
+        aq = data['questions'][0]
+
+        res = self.client.post(f'/api/attempts/{data["id"]}/submit/', {
+            'answers': json.dumps([{
+                'attempt_question_id': aq['id'],
+                'text': 'Atlantic',
+            }]),
+            'judge_api_key': 'sk-test',
+        }, format='multipart')
+
+        self.assertEqual(res.status_code, 200)
+        answer = res.data['questions'][0]['answer']
+        self.assertTrue(answer['is_correct'])
+        self.assertFalse(answer['needs_review'])
+        self.assertEqual(res.data['score'], 1)
+        self.assertNotIn('sk-test', json.dumps(res.data))
+        mock_chat.assert_called_once()
+
+    @override_settings(QUIZ_QUESTION_COUNT=1)
+    @mock.patch('quiz.judge._call_chat_completion')
+    def test_submit_with_judge_key_marks_text_incorrect(self, mock_chat):
+        mock_chat.return_value = '{"correct": false, "reason": "too vague"}'
+        question = Question.objects.create(
+            type=QuestionType.TEXT, prompt='ocean', text_answers=['Pacific'])
+        data = self._start_single_question_attempt(question)
+        aq = data['questions'][0]
+
+        res = self.client.post(f'/api/attempts/{data["id"]}/submit/', {
+            'answers': json.dumps([{
+                'attempt_question_id': aq['id'],
+                'text': 'Pacific',
+            }]),
+            'judge_api_key': 'sk-test',
+        }, format='multipart')
+
+        self.assertEqual(res.status_code, 200)
+        answer = res.data['questions'][0]['answer']
+        self.assertFalse(answer['is_correct'])
+        self.assertFalse(answer['needs_review'])
+        self.assertEqual(res.data['score'], 0)
+        mock_chat.assert_called_once()
+
+    @override_settings(QUIZ_QUESTION_COUNT=1)
+    @mock.patch('quiz.judge._call_chat_completion')
+    def test_submit_with_judge_key_marks_image_from_verdict(self, mock_chat):
+        mock_chat.return_value = '{"correct": false, "reason": "not visible"}'
+        question = Question.objects.create(
+            type=QuestionType.IMAGE, prompt='upload',
+            image_requirement='a blue object')
+        data = self._start_single_question_attempt(question)
+        aq = data['questions'][0]
+
+        res = self.client.post(f'/api/attempts/{data["id"]}/submit/', {
+            'answers': json.dumps([{'attempt_question_id': aq['id']}]),
+            f'image_{aq["id"]}': make_image_upload(),
+            'judge_api_key': 'sk-test',
+        }, format='multipart')
+
+        self.assertEqual(res.status_code, 200)
+        answer = res.data['questions'][0]['answer']
+        self.assertFalse(answer['is_correct'])
+        self.assertFalse(answer['needs_review'])
+        self.assertEqual(res.data['score'], 0)
+        mock_chat.assert_called_once()
+
+    @override_settings(QUIZ_QUESTION_COUNT=1)
+    @mock.patch('quiz.judge._call_chat_completion')
+    def test_submit_without_judge_key_falls_back_to_review(self, mock_chat):
+        question = Question.objects.create(
+            type=QuestionType.TEXT, prompt='ocean', text_answers=['Pacific'],
+            text_match_mode=TextMatchMode.EXACT)
+        data = self._start_single_question_attempt(question)
+        aq = data['questions'][0]
+
+        res = self.client.post(f'/api/attempts/{data["id"]}/submit/', {
+            'answers': json.dumps([{
+                'attempt_question_id': aq['id'],
+                'text': 'Pacific',
+            }]),
+        }, format='multipart')
+
+        self.assertEqual(res.status_code, 200)
+        answer = res.data['questions'][0]['answer']
+        self.assertTrue(answer['is_correct'])
+        self.assertTrue(answer['needs_review'])
+        mock_chat.assert_not_called()
+
+
 class RandomnessTests(TestCase):
     def setUp(self):
         self.client = APIClient()
         for i in range(20):
-            Question.objects.create(type=QuestionType.TEXT, prompt=f'Q{i}',
-                                    text_answers=['a'])
+            Question.objects.create(type=QuestionType.NUMERICAL, prompt=f'Q{i}',
+                                    numerical_answer=i)
 
     def test_attempts_are_independently_randomized(self):
         r1 = self.client.post('/api/attempts/', {'player': 'x'}, format='json')
