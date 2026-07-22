@@ -46,6 +46,13 @@ Using an AI coding agent? Point it at the onboarding skill at
 walks the agent through setup, running the app, running the tests, the codebase
 map, and the optional AI‑judge feature.
 
+- **GitHub Copilot CLI** auto-loads the skill when you describe the intent, e.g.
+  *"onboard me to this quiz platform"* or *"set up and run this project for the
+  first time."* (Skills are matched by their description, not invoked with a slash.)
+- **VS Code Copilot** users get a `/onboard` slash command from the prompt file at
+  [`.github/prompts/onboard.prompt.md`](.github/prompts/onboard.prompt.md) — type
+  `/onboard` in Copilot Chat to run the same flow.
+
 ---
 
 ## Repository layout
@@ -66,7 +73,9 @@ map, and the optional AI‑judge feature.
 │       ├── pages/          # Home, Quiz, Results, History, Admin
 │       ├── components/     # QuestionInput, QuestionForm
 │       └── api.js          # API client
-└── .github/skills/onboarding/SKILL.md   # onboarding skill for AI agents
+└── .github/
+    ├── skills/onboarding/SKILL.md    # onboarding skill (auto-loaded by agents)
+    └── prompts/onboard.prompt.md     # /onboard slash command (VS Code Copilot)
 ```
 
 ---
