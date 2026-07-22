@@ -77,10 +77,10 @@ cd backend
 python manage.py test
 ```
 
-The suite (29 tests) covers grading rules, per‑type validation, permissions,
+The suite (35 tests) covers grading rules, per‑type validation, permissions,
 the full attempt flow (start → submit → review), scoring, history, answer‑leak
 protection, staff score overrides, the auth endpoints, and independent
-randomization.
+randomization, including mocked LLM judge flows.
 
 ---
 
@@ -114,9 +114,12 @@ Open **http://localhost:5173** in your browser.
 ## Using the app
 
 ### Quiz player (no login)
-1. Go to **Play**, enter your name, and start a quiz.
-2. Answer the randomly served questions (choices, numerical, text, or image
-   upload).
+1. Go to **Play**, enter your name, and optionally enter a judge API key.
+   - With a key, the random pool may include all question types, including
+     free-response text and image uploads that are graded by an AI judge.
+   - Without a key, the quiz serves only deterministic, auto-graded question
+     types: single choice, multiple choice, and numerical.
+2. Answer the randomly served questions.
 3. Submit to see your **score (0–5)**, per‑question ✅/❌ marks, and a full
    **review** showing your answer and the correct answer(s).
 4. **My attempts** lists every previous attempt for your name; open any to
@@ -131,23 +134,31 @@ Open **http://localhost:5173** in your browser.
 
 ## Question types & grading
 
-| Type | Author provides | Auto‑grading rule |
-|------|-----------------|-------------------|
+| Type | Author provides | Grading rule |
+|------|-----------------|--------------|
 | **Single choice** | ≥2 choices, **exactly one** correct | selected == the one correct choice |
 | **Multiple choice** | ≥2 choices, **≥1** correct | selected set **exactly** matches the correct set |
 | **Numerical** | a correct answer + optional tolerance | `|answer − expected| ≤ tolerance` |
-| **Text** | accepted answers / keywords + match mode | normalized match: exact / contains‑all / contains‑any |
-| **Image upload** | a requirement description | any uploaded image is accepted; flagged for optional staff review |
+| **Text** | accepted answers / keywords + match mode | with a judge key: AI verdict; without one or on judge failure: normalized heuristic + `needs_review` |
+| **Image upload** | a requirement description | with a judge key: AI vision verdict; without one or on judge failure: uploaded image is accepted + `needs_review` |
 
 **Text grading** normalizes input (lowercase, trims, strips punctuation,
 collapses whitespace) before matching, and supports multiple accepted answers or
 keyword matching.
 
-**Image grading** cannot verify image contents automatically, so an uploaded
-image is treated as meeting the requirement (correct) and flagged
-`needs_review` so a staff member can adjust the result later via the Django
-admin. This keeps the immediate 0–5 results screen intact while acknowledging
-the limitation.
+**AI judging:** text and image questions are included only when the client sends
+a per-request judge API key while starting the attempt. The same key must be sent
+again on submit for text/image answers to be judged. The backend uses an
+OpenAI-compatible Chat Completions API, sends the question prompt and accepted
+answers/keywords or image requirement, asks for strict JSON
+`{"correct": true/false, "reason": "..."}`, and sets `needs_review=false` when a
+valid verdict is returned.
+
+If no key is sent on submit, or the judge call fails, times out, or returns
+malformed JSON, the app falls back to the existing heuristic behavior. Text
+answers use normalized matching and are flagged `needs_review`; image uploads
+are treated as correct and flagged `needs_review` so staff can adjust them in the
+Django admin.
 
 Validation is enforced both in the API serializer and surfaced in the admin UI.
 
@@ -165,7 +176,7 @@ Base URL: `/api`
 | `GET` | `/auth/me/` | – | Current user info |
 | `GET/POST` | `/questions/` | staff | List / create questions (filters: `type`, `category`, `difficulty`, `search`) |
 | `GET/PUT/PATCH/DELETE` | `/questions/{id}/` | staff | Retrieve / update / delete a question |
-| `POST` | `/attempts/` | – | Start an attempt (`{"player": "name"}`) → returns random questions (no answers) |
+| `POST` | `/attempts/` | – | Start an attempt (`{"player": "name", "judge_api_key": "..."}`; key optional) → returns random questions (no answers) |
 | `POST` | `/attempts/{id}/submit/` | – | Submit answers (`multipart/form-data`) → graded review |
 | `GET` | `/attempts/{id}/` | – | Attempt details (answers hidden until submitted) |
 | `GET` | `/attempts/?player=name` | – | A player's attempt history |
@@ -174,6 +185,12 @@ Base URL: `/api`
 - `answers` — JSON string:
   `[{"attempt_question_id": 1, "text": "...", "numerical": 42, "selected_choice_ids": [3,4]}]`
 - image files as separate fields named `image_<attempt_question_id>`.
+- optional judge fields: `judge_api_key`, `judge_model`, `judge_base_url`.
+
+**Judge defaults and overrides:** when a judge key is provided, the backend calls
+`https://api.openai.com/v1/chat/completions` using model `gpt-4o-mini` by
+default. Clients may override the provider/model per request with
+`judge_base_url` and `judge_model`.
 
 ---
 
@@ -190,6 +207,9 @@ Backend settings read from environment variables (all optional):
 | `DJANGO_CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Allowed CORS origins |
 | `DJANGO_CSRF_TRUSTED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Trusted CSRF origins |
 
+Judge API keys are provided by the client per request, not via server
+environment variables.
+
 ---
 
 ## Non‑functional notes
@@ -198,6 +218,11 @@ Backend settings read from environment variables (all optional):
   controls, `fieldset`/`legend` for choice groups, visible keyboard focus,
   `aria-live` status updates, descriptive per‑page titles, and focus moved to
   the main region on client‑side navigation.
+- **Security:** judge API keys are held only in request memory on the backend.
+  They are never stored on attempts, written to the database, logged, or echoed
+  back by serializers. The frontend stores a provided key only in `sessionStorage`
+  for the active attempt so it can be sent again on submit; it is removed after
+  submit or cancel and is never written to long-lived `localStorage`.
 - **Responsive:** fluid layout that works on mobile and desktop.
 - **Persistence:** all data is stored in SQLite (`backend/db.sqlite3`); uploaded
   images are stored under `backend/media/`.

@@ -15,6 +15,7 @@ from rest_framework.permissions import AllowAny, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from . import judge
 from .grading import grade_answer
 from .models import Answer, Attempt, AttemptQuestion, Choice, Question, QuestionType
 from .serializers import (
@@ -23,6 +24,14 @@ from .serializers import (
     AttemptStartSerializer,
     QuestionSerializer,
 )
+
+
+DETERMINISTIC_QUESTION_TYPES = (
+    QuestionType.SINGLE,
+    QuestionType.MULTIPLE,
+    QuestionType.NUMERICAL,
+)
+JUDGED_QUESTION_TYPES = (QuestionType.TEXT, QuestionType.IMAGE)
 
 
 class QuestionViewSet(viewsets.ModelViewSet):
@@ -88,15 +97,32 @@ class AttemptViewSet(viewsets.GenericViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        judge_options = self._get_judge_options(request)
         count = settings.QUIZ_QUESTION_COUNT
-        question_ids = list(
-            Question.objects.values_list('id', flat=True).order_by('?')[:count]
-        )
-        if not question_ids:
+        questions = Question.objects.all()
+        if not judge_options['api_key']:
+            questions = questions.filter(type__in=DETERMINISTIC_QUESTION_TYPES)
+        eligible_count = questions.count()
+        if eligible_count < count:
+            if not Question.objects.exists():
+                detail = 'The question bank is empty. Seed questions first.'
+            elif eligible_count == 0 and not judge_options['api_key']:
+                detail = (
+                    'No auto-graded questions are available. Provide a judge '
+                    'API key or add single, multiple, or numerical questions.'
+                )
+            else:
+                detail = (
+                    f'At least {count} eligible questions are required to start '
+                    f'a quiz; found {eligible_count}.'
+                )
             return Response(
-                {'detail': 'The question bank is empty. Seed questions first.'},
+                {'detail': detail},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        question_ids = list(
+            questions.values_list('id', flat=True).order_by('?')[:count]
+        )
 
         with transaction.atomic():
             attempt = Attempt.objects.create(player=player, total=len(question_ids))
@@ -137,6 +163,7 @@ class AttemptViewSet(viewsets.GenericViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        judge_options = self._get_judge_options(request)
         score = 0
         with transaction.atomic():
             for aq in attempt.attempt_questions.select_related('question'):
@@ -154,12 +181,8 @@ class AttemptViewSet(viewsets.GenericViewSet):
                 else:
                     valid_ids = set()
 
-                is_correct, needs_review = grade_answer(
-                    question,
-                    text=payload.get('text'),
-                    numerical=payload.get('numerical'),
-                    selected_ids=valid_ids,
-                    has_image=bool(image_file),
+                is_correct, needs_review = self._grade_submission(
+                    question, payload, image_file, valid_ids, judge_options
                 )
 
                 answer = Answer.objects.create(
@@ -196,6 +219,45 @@ class AttemptViewSet(viewsets.GenericViewSet):
             )
             .filter(pk=pk)
             .first()
+        )
+
+    @staticmethod
+    def _get_judge_options(request):
+        return {
+            'api_key': ((request.data.get('judge_api_key') or '').strip() or None),
+            'model': ((request.data.get('judge_model') or '').strip() or None),
+            'base_url': ((request.data.get('judge_base_url') or '').strip() or None),
+        }
+
+    @staticmethod
+    def _grade_submission(question, payload, image_file, valid_ids, judge_options):
+        api_key = judge_options['api_key']
+        if api_key and question.type in JUDGED_QUESTION_TYPES:
+            if question.type == QuestionType.TEXT:
+                verdict = judge.judge_text_answer(
+                    question,
+                    payload.get('text'),
+                    api_key=api_key,
+                    model=judge_options['model'],
+                    base_url=judge_options['base_url'],
+                )
+            else:
+                verdict = judge.judge_image_answer(
+                    question,
+                    image_file,
+                    api_key=api_key,
+                    model=judge_options['model'],
+                    base_url=judge_options['base_url'],
+                )
+            if verdict is not None:
+                return verdict.correct, False
+
+        return grade_answer(
+            question,
+            text=payload.get('text'),
+            numerical=payload.get('numerical'),
+            selected_ids=valid_ids,
+            has_image=bool(image_file),
         )
 
     @staticmethod

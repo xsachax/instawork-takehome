@@ -45,6 +45,28 @@ async function request(path, { method = 'GET', body, isForm = false } = {}) {
   return data
 }
 
+function readJudgeOption(options, camelName, apiName) {
+  return options?.[camelName] ?? options?.[apiName] ?? ''
+}
+
+function appendJudgeOptions(target, options = {}) {
+  const fields = {
+    judge_api_key: readJudgeOption(options, 'judgeApiKey', 'judge_api_key'),
+    judge_model: readJudgeOption(options, 'judgeModel', 'judge_model'),
+    judge_base_url: readJudgeOption(options, 'judgeBaseUrl', 'judge_base_url'),
+  }
+  Object.entries(fields).forEach(([name, value]) => {
+    const trimmed = typeof value === 'string' ? value.trim() : value
+    if (!trimmed) return
+    if (target instanceof FormData) {
+      target.append(name, trimmed)
+    } else {
+      target[name] = trimmed
+    }
+  })
+  return target
+}
+
 export const api = {
   // Auth
   me: () => request('/auth/me/'),
@@ -66,13 +88,16 @@ export const api = {
   deleteQuestion: (id) => request(`/questions/${id}/`, { method: 'DELETE' }),
 
   // Quiz player
-  startAttempt: (player) =>
-    request('/attempts/', { method: 'POST', body: { player } }),
+  startAttempt: (player, judgeOptions = {}) =>
+    request('/attempts/', {
+      method: 'POST',
+      body: appendJudgeOptions({ player }, judgeOptions),
+    }),
   getAttempt: (id) => request(`/attempts/${id}/`),
-  submitAttempt: (id, formData) =>
+  submitAttempt: (id, formData, judgeOptions = {}) =>
     request(`/attempts/${id}/submit/`, {
       method: 'POST',
-      body: formData,
+      body: appendJudgeOptions(formData, judgeOptions),
       isForm: true,
     }),
   listAttempts: (player) =>
