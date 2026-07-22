@@ -77,9 +77,10 @@ cd backend
 python manage.py test
 ```
 
-The suite (23 tests) covers grading rules, per‑type validation, permissions,
+The suite (29 tests) covers grading rules, per‑type validation, permissions,
 the full attempt flow (start → submit → review), scoring, history, answer‑leak
-protection, and independent randomization.
+protection, staff score overrides, the auth endpoints, and independent
+randomization.
 
 ---
 
@@ -103,6 +104,7 @@ Other frontend commands:
 npm run build      # production build into dist/
 npm run preview    # preview the production build
 npm run lint       # oxlint
+npm test           # Vitest component tests
 ```
 
 Open **http://localhost:5173** in your browser.
@@ -193,8 +195,9 @@ Backend settings read from environment variables (all optional):
 ## Non‑functional notes
 
 - **Accessibility:** semantic landmarks, a skip‑to‑content link, labelled form
-  controls, `fieldset`/`legend` for choice groups, visible keyboard focus, and
-  `aria-live` status updates.
+  controls, `fieldset`/`legend` for choice groups, visible keyboard focus,
+  `aria-live` status updates, descriptive per‑page titles, and focus moved to
+  the main region on client‑side navigation.
 - **Responsive:** fluid layout that works on mobile and desktop.
 - **Persistence:** all data is stored in SQLite (`backend/db.sqlite3`); uploaded
   images are stored under `backend/media/`.
