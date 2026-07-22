@@ -12,7 +12,14 @@ a range of categories and difficulties.
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from quiz.models import Choice, Question, QuestionType, Difficulty, TextMatchMode
+from quiz.models import (
+    Attempt,
+    Choice,
+    Question,
+    QuestionType,
+    Difficulty,
+    TextMatchMode,
+)
 
 
 QUESTIONS = [
@@ -146,14 +153,20 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument(
             '--flush', action='store_true',
-            help='Delete all existing questions before seeding.',
+            help='Delete all existing questions (and dependent attempts) before seeding.',
         )
 
     @transaction.atomic
     def handle(self, *args, **options):
         if options['flush']:
+            # Questions are protected while referenced by an attempt, so clear
+            # attempts first (this cascades to their answers) to allow a reset.
+            attempts_deleted, _ = Attempt.objects.all().delete()
             deleted, _ = Question.objects.all().delete()
-            self.stdout.write(self.style.WARNING(f'Deleted existing questions ({deleted} rows).'))
+            self.stdout.write(self.style.WARNING(
+                f'Deleted existing questions ({deleted} rows) '
+                f'and attempts ({attempts_deleted} rows).'
+            ))
 
         created = 0
         for data in QUESTIONS:
