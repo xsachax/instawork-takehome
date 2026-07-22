@@ -16,6 +16,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .grading import grade_answer
+from . import judge as judge_module
 from .models import Answer, Attempt, AttemptQuestion, Choice, Question, QuestionType
 from .serializers import (
     AttemptReviewSerializer,
@@ -80,7 +81,15 @@ class AttemptViewSet(viewsets.GenericViewSet):
         return Response(AttemptReviewSerializer(attempt).data)
 
     def create(self, request):
-        """Start a new attempt with N random, non-repeating questions."""
+        """Start a new attempt with N random, non-repeating questions.
+
+        An optional judge API key may be supplied (``judge_api_key``). When a
+        key is present the random pool may include every question type; without
+        a key the pool is restricted to deterministic types (single, multiple,
+        numerical) so the player is never served a text/image question that
+        can't be auto-graded. The key itself is only inspected here — it is
+        never stored, logged, or attached to the attempt.
+        """
         player = (request.data.get('player') or '').strip()
         if not player:
             return Response(
@@ -88,9 +97,16 @@ class AttemptViewSet(viewsets.GenericViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        judge_key = self._judge_key(request)
+
         count = settings.QUIZ_QUESTION_COUNT
+        pool = Question.objects.all()
+        if not judge_key:
+            pool = pool.exclude(
+                type__in=[QuestionType.TEXT, QuestionType.IMAGE]
+            )
         question_ids = list(
-            Question.objects.values_list('id', flat=True).order_by('?')[:count]
+            pool.values_list('id', flat=True).order_by('?')[:count]
         )
         if not question_ids:
             return Response(
@@ -137,6 +153,12 @@ class AttemptViewSet(viewsets.GenericViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Judge configuration is read from the request and held only in memory
+        # for the duration of this call — never persisted or logged.
+        judge_key = self._judge_key(request)
+        judge_model = (request.data.get('judge_model') or '').strip() or None
+        judge_base_url = (request.data.get('judge_base_url') or '').strip() or None
+
         score = 0
         with transaction.atomic():
             for aq in attempt.attempt_questions.select_related('question'):
@@ -154,12 +176,14 @@ class AttemptViewSet(viewsets.GenericViewSet):
                 else:
                     valid_ids = set()
 
-                is_correct, needs_review = grade_answer(
+                is_correct, needs_review = self._grade(
                     question,
-                    text=payload.get('text'),
-                    numerical=payload.get('numerical'),
-                    selected_ids=valid_ids,
-                    has_image=bool(image_file),
+                    payload=payload,
+                    valid_ids=valid_ids,
+                    image_file=image_file,
+                    judge_key=judge_key,
+                    judge_model=judge_model,
+                    judge_base_url=judge_base_url,
                 )
 
                 answer = Answer.objects.create(
@@ -187,6 +211,50 @@ class AttemptViewSet(viewsets.GenericViewSet):
         return Response(AttemptReviewSerializer(attempt).data)
 
     # -- helpers ------------------------------------------------------------
+    @staticmethod
+    def _judge_key(request):
+        """Return the per-request judge API key, if the client supplied one.
+
+        The value is only read into a local variable and returned; it is never
+        stored on the model, cached, or logged.
+        """
+        return (request.data.get('judge_api_key') or '').strip() or None
+
+    @staticmethod
+    def _grade(question, *, payload, valid_ids, image_file, judge_key,
+               judge_model, judge_base_url):
+        """Grade one answer, using the AI judge for text/image when possible.
+
+        Deterministic types always use the exact rules in ``grading``. Text and
+        image answers are sent to the judge only when a key is present and there
+        is something to judge; a successful verdict sets ``needs_review=False``.
+        On a missing key or any judge failure we fall back to the existing
+        heuristic grading (which keeps ``needs_review=True``).
+        """
+        if judge_key:
+            verdict = None
+            if question.type == QuestionType.TEXT:
+                verdict = judge_module.judge_text(
+                    question, payload.get('text'),
+                    api_key=judge_key, model=judge_model, base_url=judge_base_url,
+                )
+            elif question.type == QuestionType.IMAGE and image_file:
+                data_url = judge_module.image_to_data_url(image_file)
+                verdict = judge_module.judge_image(
+                    question, data_url,
+                    api_key=judge_key, model=judge_model, base_url=judge_base_url,
+                )
+            if verdict is not None:
+                return bool(verdict['correct']), False
+
+        return grade_answer(
+            question,
+            text=payload.get('text'),
+            numerical=payload.get('numerical'),
+            selected_ids=valid_ids,
+            has_image=bool(image_file),
+        )
+
     def _get_attempt(self, pk):
         return (
             Attempt.objects

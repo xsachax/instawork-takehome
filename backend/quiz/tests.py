@@ -3,6 +3,7 @@
 import io
 import json
 from decimal import Decimal
+from unittest import mock
 
 from django.contrib.auth.models import User
 from django.test import TestCase
@@ -16,6 +17,9 @@ from quiz.grading import (
     grade_text,
 )
 from quiz.models import (
+    Answer,
+    Attempt,
+    AttemptQuestion,
     Choice,
     Difficulty,
     Question,
@@ -195,8 +199,13 @@ class AttemptFlowTests(TestCase):
             type=QuestionType.IMAGE, prompt='upload',
             image_requirement='any image')
 
-    def _start(self, player='alice'):
-        res = self.client.post('/api/attempts/', {'player': player}, format='json')
+    def _start(self, player='alice', judge_api_key='sk-test'):
+        # A judge key is supplied so the full 5-type bank (including text and
+        # image) is served; without a key the pool is deterministic-only.
+        body = {'player': player}
+        if judge_api_key:
+            body['judge_api_key'] = judge_api_key
+        res = self.client.post('/api/attempts/', body, format='json')
         self.assertEqual(res.status_code, 201)
         return res.data
 
@@ -323,8 +332,11 @@ class RandomnessTests(TestCase):
                                     text_answers=['a'])
 
     def test_attempts_are_independently_randomized(self):
-        r1 = self.client.post('/api/attempts/', {'player': 'x'}, format='json')
-        r2 = self.client.post('/api/attempts/', {'player': 'x'}, format='json')
+        # The bank here is all text questions, so a judge key is needed to
+        # include them in the pool.
+        body = {'player': 'x', 'judge_api_key': 'sk-test'}
+        r1 = self.client.post('/api/attempts/', body, format='json')
+        r2 = self.client.post('/api/attempts/', body, format='json')
         ids1 = [aq['question']['id'] for aq in r1.data['questions']]
         ids2 = [aq['question']['id'] for aq in r2.data['questions']]
         self.assertEqual(len(ids1), 5)
@@ -415,3 +427,213 @@ class ScoreOverrideTests(TestCase):
         attempt.recompute_score()
         attempt.refresh_from_db()
         self.assertEqual(attempt.score, 0)
+
+class JudgeStartPoolTests(TestCase):
+    """The presence of a judge API key controls which question types are drawn."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.single = make_choice_question(
+            QuestionType.SINGLE, [('Right', True), ('Wrong', False)])
+        self.numerical = Question.objects.create(
+            type=QuestionType.NUMERICAL, prompt='2+2',
+            numerical_answer=Decimal('4'), numerical_tolerance=Decimal('0'))
+        self.text = Question.objects.create(
+            type=QuestionType.TEXT, prompt='Explain X',
+            text_answers=['foo'], text_match_mode=TextMatchMode.EXACT)
+        self.image = Question.objects.create(
+            type=QuestionType.IMAGE, prompt='upload',
+            image_requirement='a blue thing')
+
+    def test_start_without_key_excludes_text_and_image(self):
+        res = self.client.post('/api/attempts/', {'player': 'a'}, format='json')
+        self.assertEqual(res.status_code, 201)
+        types = {aq['question']['type'] for aq in res.data['questions']}
+        self.assertNotIn('text', types)
+        self.assertNotIn('image', types)
+        # Only the two deterministic questions remain in the pool.
+        self.assertEqual(res.data['total'], 2)
+
+    def test_start_with_key_includes_text_and_image(self):
+        res = self.client.post(
+            '/api/attempts/',
+            {'player': 'a', 'judge_api_key': 'sk-test'},
+            format='json',
+        )
+        self.assertEqual(res.status_code, 201)
+        types = {aq['question']['type'] for aq in res.data['questions']}
+        self.assertIn('text', types)
+        self.assertIn('image', types)
+        self.assertEqual(res.data['total'], 4)
+
+
+class JudgeSubmitTests(TestCase):
+    """Submit-time grading of text/image answers via the (mocked) AI judge.
+
+    The single network boundary ``quiz.judge._call_chat_completion`` is patched
+    so no real HTTP request is ever made.
+    """
+
+    def setUp(self):
+        self.client = APIClient()
+
+    def _attempt_with(self, question):
+        attempt = Attempt.objects.create(player='a', total=1)
+        aq = AttemptQuestion.objects.create(
+            attempt=attempt, question=question, order=0)
+        return attempt, aq
+
+    def _submit(self, attempt, extra):
+        return self.client.post(
+            f'/api/attempts/{attempt.id}/submit/', extra, format='multipart')
+
+    def test_submit_with_key_marks_text_correct_from_verdict(self):
+        q = Question.objects.create(
+            type=QuestionType.TEXT, prompt='q', text_answers=['foo'],
+            text_match_mode=TextMatchMode.EXACT)
+        attempt, aq = self._attempt_with(q)
+        # Response does NOT match the accepted answer, so the heuristic alone
+        # would fail it; the judge's "correct" verdict must win.
+        answers = [{'attempt_question_id': aq.id, 'text': 'a long explanation'}]
+        with mock.patch(
+            'quiz.judge._call_chat_completion',
+            return_value='{"correct": true, "reason": "good"}',
+        ) as called:
+            res = self._submit(attempt, {
+                'answers': json.dumps(answers), 'judge_api_key': 'sk-test'})
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(called.called)
+        self.assertEqual(res.data['score'], 1)
+        answer = res.data['questions'][0]['answer']
+        self.assertTrue(answer['is_correct'])
+        self.assertFalse(answer['needs_review'])
+
+    def test_submit_with_key_marks_text_incorrect_from_verdict(self):
+        q = Question.objects.create(
+            type=QuestionType.TEXT, prompt='q', text_answers=['foo'],
+            text_match_mode=TextMatchMode.EXACT)
+        attempt, aq = self._attempt_with(q)
+        # Response DOES match the accepted answer (heuristic would pass it), but
+        # the judge's "incorrect" verdict must win.
+        answers = [{'attempt_question_id': aq.id, 'text': 'foo'}]
+        with mock.patch(
+            'quiz.judge._call_chat_completion',
+            return_value='{"correct": false, "reason": "off topic"}',
+        ) as called:
+            res = self._submit(attempt, {
+                'answers': json.dumps(answers), 'judge_api_key': 'sk-test'})
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(called.called)
+        self.assertEqual(res.data['score'], 0)
+        answer = res.data['questions'][0]['answer']
+        self.assertFalse(answer['is_correct'])
+        self.assertFalse(answer['needs_review'])
+
+    def test_submit_with_key_grades_image_from_verdict(self):
+        q = Question.objects.create(
+            type=QuestionType.IMAGE, prompt='q', image_requirement='blue')
+        attempt, aq = self._attempt_with(q)
+        answers = [{'attempt_question_id': aq.id}]
+        # The heuristic would accept any uploaded image; the judge's "incorrect"
+        # verdict must win and clear needs_review.
+        with mock.patch(
+            'quiz.judge._call_chat_completion',
+            return_value='{"correct": false, "reason": "not blue"}',
+        ) as called:
+            res = self._submit(attempt, {
+                'answers': json.dumps(answers),
+                'judge_api_key': 'sk-test',
+                f'image_{aq.id}': make_image_upload(),
+            })
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(called.called)
+        self.assertEqual(res.data['score'], 0)
+        answer = res.data['questions'][0]['answer']
+        self.assertFalse(answer['is_correct'])
+        self.assertFalse(answer['needs_review'])
+        self.assertTrue(answer['image_response'])
+
+    def test_submit_with_key_marks_image_correct_from_verdict(self):
+        q = Question.objects.create(
+            type=QuestionType.IMAGE, prompt='q', image_requirement='blue')
+        attempt, aq = self._attempt_with(q)
+        answers = [{'attempt_question_id': aq.id}]
+        with mock.patch(
+            'quiz.judge._call_chat_completion',
+            return_value='{"correct": true, "reason": "blue enough"}',
+        ):
+            res = self._submit(attempt, {
+                'answers': json.dumps(answers),
+                'judge_api_key': 'sk-test',
+                f'image_{aq.id}': make_image_upload(),
+            })
+        self.assertEqual(res.status_code, 200)
+        answer = res.data['questions'][0]['answer']
+        self.assertTrue(answer['is_correct'])
+        self.assertFalse(answer['needs_review'])
+
+    def test_submit_without_key_falls_back_to_heuristic(self):
+        q = Question.objects.create(
+            type=QuestionType.TEXT, prompt='q', text_answers=['foo'],
+            text_match_mode=TextMatchMode.EXACT)
+        attempt, aq = self._attempt_with(q)
+        answers = [{'attempt_question_id': aq.id, 'text': 'foo'}]
+        with mock.patch('quiz.judge._call_chat_completion') as called:
+            res = self._submit(attempt, {'answers': json.dumps(answers)})
+        self.assertEqual(res.status_code, 200)
+        # No key -> the judge (and its HTTP boundary) is never invoked.
+        self.assertFalse(called.called)
+        answer = res.data['questions'][0]['answer']
+        # Heuristic exact match still grades it and flags it for review.
+        self.assertTrue(answer['is_correct'])
+        self.assertTrue(answer['needs_review'])
+
+    def test_submit_with_key_but_judge_error_falls_back(self):
+        q = Question.objects.create(
+            type=QuestionType.TEXT, prompt='q', text_answers=['foo'],
+            text_match_mode=TextMatchMode.EXACT)
+        attempt, aq = self._attempt_with(q)
+        answers = [{'attempt_question_id': aq.id, 'text': 'foo'}]
+        with mock.patch(
+            'quiz.judge._call_chat_completion',
+            side_effect=RuntimeError('network down'),
+        ) as called:
+            res = self._submit(attempt, {
+                'answers': json.dumps(answers), 'judge_api_key': 'sk-test'})
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(called.called)
+        answer = res.data['questions'][0]['answer']
+        # Judge failed -> heuristic grading with needs_review preserved.
+        self.assertTrue(answer['is_correct'])
+        self.assertTrue(answer['needs_review'])
+
+
+class JudgeUnitTests(TestCase):
+    """Unit tests for the judge module's parsing and encoding helpers."""
+
+    def test_parse_verdict_handles_plain_json(self):
+        from quiz import judge
+        verdict = judge._parse_verdict('{"correct": true, "reason": "ok"}')
+        self.assertEqual(verdict, {'correct': True, 'reason': 'ok'})
+
+    def test_parse_verdict_extracts_embedded_json(self):
+        from quiz import judge
+        verdict = judge._parse_verdict('Sure! {"correct": false, "reason": "no"}')
+        self.assertEqual(verdict['correct'], False)
+
+    def test_parse_verdict_rejects_garbage(self):
+        from quiz import judge
+        self.assertIsNone(judge._parse_verdict('not json at all'))
+
+    def test_judge_text_without_key_returns_none(self):
+        from quiz import judge
+        q = Question.objects.create(
+            type=QuestionType.TEXT, prompt='q', text_answers=['foo'])
+        self.assertIsNone(judge.judge_text(q, 'foo', api_key=None))
+
+    def test_image_to_data_url_roundtrip(self):
+        from quiz import judge
+        upload = make_image_upload()
+        data_url = judge.image_to_data_url(upload)
+        self.assertTrue(data_url.startswith('data:'))
+        self.assertIn(';base64,', data_url)
